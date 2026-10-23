@@ -1,0 +1,153 @@
+*bracey-nvim.txt*  Live html, css, and javascript editing in neovim
+*bracey*
+
+License: GPLv2
+Author: Mason Clayton <hi@turb.io> (original bracey.vim)
+        bracey.nvim port (lua + lazy.nvim)
+
+==============================================================================
+CONTENTS                                                         *bracey-toc*
+
+  1. Introduction............|bracey-intro|
+  2. Commands................|bracey-commands|
+  3. Options.................|bracey-options|
+  4. Installation............|bracey-install|
+  5. How it works............|bracey-architecture|
+
+==============================================================================
+1. Introduction                                                  *bracey-intro*
+
+bracey.nvim is a port of the classic bracey.vim live-editing plugin, rewritten
+for Neovim in Lua and packaged for lazy.nvim.
+
+It lets you edit HTML, CSS, and JavaScript in Neovim and see the changes
+reflected live in a web browser. The standout feature is live CSS editing:
+place your cursor on a CSS rule and bracey highlights every element that rule
+selects in the browser.
+
+Unlike the original, bracey.nvim does not require Vim to be compiled with
+Python support — it is pure Lua and talks to the Node.js server over HTTP.
+
+==============================================================================
+2. Commands                                                      *bracey-commands*
+
+:Bracey                                                       *:Bracey*
+
+    Start the bracey server and (optionally) open your default web browser to
+    bracey's address. If an HTML file is open as the current buffer, it will be
+    displayed and you may begin editing it live.
+
+:BraceyStop                                                   *:BraceyStop*
+
+    Shut down the Node.js server and stop sending commands.
+
+:BraceyReload                                                 *:BraceyReload*
+
+    Force the current web page to be reloaded.
+
+:BraceyEval {args}                                            *:BraceyEval*
+
+    If arguments are given, evaluate them as JavaScript in the browser.
+    Otherwise, evaluate the entire current buffer (regardless of filetype).
+
+==============================================================================
+3. Options                                                       *bracey-options*
+
+All options are passed to `require("bracey").setup({ ... })`. They mirror the
+original `g:bracey_*` variables.
+
+g:bracey_browser_command                        *g:bracey_browser_command*
+
+    Type: string | number
+    Default: 0
+
+    If set to a string, used as the command to launch the browser. If set to
+    0, the browser is detected automatically (`xdg-open` on Linux, `open` on
+    macOS).
+
+g:bracey_auto_start_browser                     *g:bracey_auto_start_browser*
+
+    Type: boolean
+    Default: true
+
+    Whether to start the browser when `:Bracey` is run.
+
+g:bracey_refresh_on_save                        *g:bracey_refresh_on_save*
+
+    Type: boolean
+    Default: false
+
+    Whether to reload the current web page whenever its corresponding HTML
+    buffer is written.
+
+g:bracey_eval_on_save                           *g:bracey_eval_on_save*
+
+    Type: boolean
+    Default: true
+
+    Whether to evaluate a buffer containing JavaScript when it is saved.
+
+g:bracey_auto_start_server                      *g:bracey_auto_start_server*
+
+    Type: boolean
+    Default: true
+
+    Whether to start the Node.js server when `:Bracey` is run.
+
+g:bracey_server_allow_remote_connections        *g:bracey_server_allow_remote_connections*
+
+    Type: boolean
+    Default: false
+
+    Whether to allow other machines on the network to connect to the Node
+    server's webpage.
+
+g:bracey_server_port                            *g:bracey_server_port*
+
+    Type: number | nil
+    Default: nil (random port derived from nvim's pid)
+
+    The port the Node server serves files at and receives commands at.
+
+g:bracey_server_path                            *g:bracey_server_path*
+
+    Type: string
+    Default: "http://127.0.0.1"
+
+    Address at which the Node server resides (starts with "http://", no port).
+
+g:bracey_server_log                             *g:bracey_server_log*
+
+    Type: string | nil
+    Default: nil
+
+    Location to log the Node server's output.
+
+==============================================================================
+4. Installation                                                  *bracey-install*
+
+bracey.nvim is designed for lazy.nvim. See README.md for the full example.
+
+Prerequisites: Node.js and npm.
+
+After installing, run `npm install --prefix server` from the plugin directory
+so the Node.js server can load its dependencies.
+
+==============================================================================
+5. How it works                                          *bracey-architecture*
+
++-----------+     +---------------+     +-----------+
+| neovim    |     | node.js       |     | browser   |
+| (lua)     | --> | server        | --> | client    |
+|           |     |               |     |           |
++-----------+     +---------------+     +-----------+
+
+Neovim spawns the Node.js server (`server/launch.js`) and communicates over
+HTTP. The server maintains file state, parses HTML/CSS, diffs changes, and
+broadcasts commands to the browser over WebSocket.
+
+The browser client is injected into the served page and carries out actions on
+behalf of the server (apply edits, reload CSS, highlight elements, eval JS).
+
+==============================================================================
+vim:tw=78:ts=2:sts=2:sw=2:ft=help:norl:
