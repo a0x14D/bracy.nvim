@@ -201,7 +201,7 @@ Server.prototype.handleFileRequest = function (request, response) {
 			response.end(this.files.errorPage.webSrc("wait for file...", "vim hasn't opened an html file yet, or at least bracey isn't aware of any"));
 		} else {
 			response.writeHead(302, {
-				Location: currentFile.path.relative,
+				Location: "/" + currentFile.path.relative,
 			});
 			response.end();
 		}
@@ -215,22 +215,69 @@ Server.prototype.handleFileRequest = function (request, response) {
 	var self = this;
 	if (file) {
 		response.writeHead(200, {
-			"Content-Type": mime.lookup(url),
+			"Content-Type": (mime.getType || mime.lookup)(url),
 		});
 		response.end(file.webSrc());
 	} else {
-		fs.readFile(this.files.editorRoot + url, function (err, data) {
-			if (err) {
+		var candidates = this.fileCandidates(url);
+		var tried = 0;
+		function tryNext() {
+			if (tried >= candidates.length) {
 				response.writeHead(404);
-				response.end(self.files.errorPage.webSrc("file could not be read", err.toString()));
-			} else {
-				response.writeHead(200, {
-					"Content-Type": mime.lookup(url),
-				});
-				response.end(data, "binary");
+				response.end(self.files.errorPage.webSrc("file could not be read", "ENOENT: tried " + candidates.join(", ")));
+				return;
 			}
-		});
+			var fullPath = candidates[tried++];
+			fs.readFile(fullPath, function (err, data) {
+				if (err) {
+					tryNext();
+				} else {
+					response.writeHead(200, {
+						"Content-Type": (mime.getType || mime.lookup)(fullPath) || "application/octet-stream",
+					});
+					response.end(data, "binary");
+				}
+			});
+		}
+		tryNext();
 	}
+};
+
+// Build an ordered list of filesystem paths that a URL might refer to.
+// Assets referenced by the current HTML file live next to it, but the editor
+// root and the server cwd are also plausible bases, so try them all.
+Server.prototype.fileCandidates = function (url) {
+	var rel = url.replace(/^\/+/, "");
+	var candidates = [];
+	var seen = {};
+
+	function add(p) {
+		if (!p || seen[p]) {
+			return;
+		}
+		seen[p] = true;
+		candidates.push(p);
+	}
+
+	// Absolute-looking URLs are still treated as relative to a base, since the
+	// browser resolves them against the served page.
+	add(rel);
+
+	var root = this.files.editorRoot;
+	if (root) {
+		var cleanRoot = root.replace(/\/+$/, "");
+		add(cleanRoot + "/" + rel);
+	}
+
+	var currentHtml = this.files.getCurrentHtmlFile();
+	if (currentHtml && currentHtml.path && currentHtml.path.system) {
+		var htmlDir = currentHtml.path.system.replace(/\/[^\/]*$/, "");
+		add(htmlDir + "/" + rel);
+	}
+
+	add(process.cwd().replace(/\/+$/, "") + "/" + rel);
+
+	return candidates;
 };
 
 Server.prototype.webSocketRequest = function (request) {

@@ -67,8 +67,25 @@ HtmlFile.prototype.webSrc = function () {
 		],
 	});
 
-	return domutils.getOuterHTML(webSourceHtml);
+	// dom-serializer only leaves <script>/<style> bodies unescaped when the text
+	// node can see its parent. stripElements intentionally drops parent links so
+	// that diff hashing stays acyclic, so restore them on this throwaway copy.
+	linkParents(webSourceHtml, null);
+
+	// "utf8" makes normal text use escapeText (only &, < and >) instead of
+	// encodeXML, which would turn quotes into &quot;/&apos;.
+	return domutils.getOuterHTML(webSourceHtml, { encodeEntities: "utf8" });
 };
+
+// Attach parent pointers used by the serializer to detect raw-text elements.
+function linkParents(nodes, parent) {
+	nodes.forEach(function (node) {
+		node.parent = parent;
+		if (node.children && node.children.length > 0) {
+			linkParents(node.children, node);
+		}
+	});
+}
 
 HtmlFile.prototype.tagFromPosition = function (line, column) {
 	if (this.parsedHtml == undefined) {

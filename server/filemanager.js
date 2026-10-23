@@ -51,13 +51,17 @@ FileManager.prototype.newFile = function (id, name, path, type, source) {
 	createdFile.name = name;
 
 	var relativePath = null;
-	if (path.startsWith(this.editorRoot)) {
+	if (this.editorRoot && path && path.indexOf(this.editorRoot) === 0) {
 		relativePath = path.substring(this.editorRoot.length);
 		if (relativePath[0] == "/") {
 			relativePath = relativePath.substr(1);
 		}
+	} else if (this.editorRoot && this.editorRoot !== "") {
+		// Use basename when path is outside editorRoot
+		relativePath = (name && name.split("/").pop()) || (path && path.split("/").pop()) || name || path;
 	} else {
-		relativePath = name;
+		// No editorRoot set yet - use basename
+		relativePath = (name && name.split("/").pop()) || (path && path.split("/").pop()) || name || path;
 	}
 
 	createdFile.path = {
