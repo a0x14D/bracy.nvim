@@ -36,6 +36,9 @@ M._port = nil
 ---@type boolean
 M._running = false
 
+---@type boolean
+M._ready = false
+
 -- Resolve effective config with defaults filled in
 function M.resolve_config(opts)
 	opts = opts or {}
@@ -72,6 +75,69 @@ end
 -- Internal: build the HTTP base URL
 function M.base_url()
 	return M.config.server_path .. ":" .. tostring(M._port or M.config.server_port)
+end
+
+-- Internal: extract the host from a server path like "http://127.0.0.1"
+---@param server_path string
+---@return string
+local function server_host(server_path)
+	local host = server_path:gsub("^https?://", "")
+	host = host:gsub("/.*$", "")
+	return host ~= "" and host or "127.0.0.1"
+end
+
+-- Internal: wait until the node server answers its per-session health probe.
+-- This is stronger than a TCP connect: it proves the process listening on the
+-- port is *our* server (matching token), not some unrelated service.
+---@param host string
+---@param port number
+---@param token string
+---@param timeout_ms number
+---@param callback fun(ok: boolean, reason?: string)
+function M.wait_for_health(host, port, token, timeout_ms, callback)
+	local url = ("http://%s:%d/__bracey_health"):format(host, port)
+	local deadline = vim.uv.now() + timeout_ms
+	local finished = false
+
+	local function finish(ok, reason)
+		if finished then
+			return
+		end
+		finished = true
+		callback(ok, reason)
+	end
+
+	local function attempt()
+		if finished then
+			return
+		end
+		if not M._running then
+			return finish(false, "stopped")
+		end
+		if M._server and not M._server.is_running() then
+			return finish(false, "exited")
+		end
+
+		vim.system({ "curl", "-s", "--connect-timeout", "0.5", "--max-time", "1", url }, {}, function(res)
+			vim.schedule(function()
+				if finished then
+					return
+				end
+				if res.code == 0 and vim.trim(res.stdout or "") == token then
+					return finish(true)
+				end
+				if M._server and not M._server.is_running() then
+					return finish(false, "exited")
+				end
+				if vim.uv.now() >= deadline then
+					return finish(false, "timeout")
+				end
+				vim.defer_fn(attempt, 100)
+			end)
+		end)
+	end
+
+	attempt()
 end
 
 -- Internal: send an HTTP POST to the node server
@@ -180,23 +246,24 @@ function M.start()
 	end
 
 	local cfg = M.config
-	M._port = cfg.server_port
+	local server = require("bracey.server")
+	local host = server_host(cfg.server_path)
 
-	-- Launch node server (if configured to do so)
-	if cfg.auto_start_server then
-		local server = require("bracey.server")
-		local ok, err = server.start(M._port, cfg.server_allow_remote_connections, cfg.server_path, cfg.server_log)
-		if not ok then
-			vim.notify("bracey: could not start server: " .. tostring(err), vim.log.levels.ERROR)
-			return
-		end
-		M._server = server
-	end
+	-- Unique token for this session. The health probe only succeeds when the
+	-- process answering on the port is the one we just spawned.
+	local token = ("%d-%d"):format(os.time(), vim.uv.hrtime())
 
+	local base_port = cfg.server_port
+	local max_attempts = 20
+
+	M._ready = false
 	M._running = true
 
-	-- Wait briefly for the server to bind, then set up handlers
-	vim.defer_fn(function()
+	local function after_ready()
+		if not M._running then
+			return
+		end
+		M._ready = true
 		M.setup_handlers()
 		M.set_vars()
 		M.set_file()
@@ -204,22 +271,95 @@ function M.start()
 		if cfg.auto_start_browser then
 			M.start_browser(cfg.server_path .. ":" .. tostring(M._port))
 		end
-	end, 1000)
+	end
+
+	local function fail(port, detail)
+		M.stop()
+		vim.notify(
+			("bracey: server did not start on %s:%d%s"):format(host, port, detail and ("\n" .. detail) or ""),
+			vim.log.levels.ERROR
+		)
+	end
+
+	local attempt_start
+	attempt_start = function(port, attempt)
+		if not M._running then
+			return
+		end
+		if attempt > max_attempts or port > 65535 then
+			fail(port, "no free port found")
+			return
+		end
+
+		M._port = port
+
+		local ok, err = server.start({
+			port = port,
+			allow_remote = cfg.server_allow_remote_connections,
+			log = cfg.server_log,
+			token = token,
+			on_exit = function(info)
+				-- Only warn if the session had already been announced as ready;
+				-- startup failures are handled by the readiness check below.
+				local was_ready = M._ready
+				M._ready = false
+				if was_ready then
+					M._running = false
+					vim.schedule(function()
+						vim.notify("bracey: server exited: " .. server.describe_exit(info), vim.log.levels.ERROR)
+					end)
+				end
+			end,
+		})
+
+		if not ok then
+			M._running = false
+			vim.notify("bracey: could not start server: " .. tostring(err), vim.log.levels.ERROR)
+			return
+		end
+		M._server = server
+
+		-- Never open the browser before the server answers with our token.
+		M.wait_for_health(host, port, token, 5000, function(ready)
+			if ready then
+				after_ready()
+				return
+			end
+
+			local detail = server.last_error()
+			local alive = server.is_running()
+			server.stop()
+			M._server = nil
+
+			-- The port was taken (by a stale bracey server, another program, or
+			-- something that accepts connections but is not ours). Move on to
+			-- the next port instead of opening a browser onto a dead address.
+			if not alive and detail and detail:find("EADDRINUSE", 1, true) then
+				vim.notify(("bracey: port %d is in use, trying %d"):format(port, port + 1), vim.log.levels.WARN)
+				attempt_start(port + 1, attempt + 1)
+				return
+			end
+
+			fail(port, detail)
+		end)
+	end
+
+	if cfg.auto_start_server then
+		attempt_start(base_port, 1)
+	else
+		M._port = base_port
+		after_ready()
+	end
 end
 
 -- Stop bracey
 function M.stop()
-	if not M._running then
-		return
-	end
 	if M._server then
-		local ok, err = M._server.stop()
-		if not ok then
-			vim.notify("bracey: stop error: " .. tostring(err), vim.log.levels.ERROR)
-		end
+		M._server.stop()
 		M._server = nil
 	end
 	M._running = false
+	M._ready = false
 end
 
 -- Reload the current page

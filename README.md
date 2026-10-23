@@ -29,7 +29,7 @@ file (e.g. `lua/plugins/bracey.lua`):
 ```lua
 return {
   {
-    "turbio/bracey.nvim",
+    "a0x14D/bracy.nvim",
     dependencies = {},
     opts = {
       auto_start_browser = true,
@@ -105,6 +105,13 @@ require("bracey").setup({
 
 Options can also be set as `vim.g.bracey_*` variables for backward-compatible
 documentation, but `setup()` is the recommended way.
+
+## Troubleshooting
+
+- **"Unable to connect" / browser opens to a dead port**: The plugin now waits for the server to pass a health probe (`/__bracey_health`) before opening your browser, automatically tries free ports if the preferred port is in use, and reports the actual port via `:notify`. A per-session token prevents false positives from unrelated processes.
+- **`:BraceyStop` doesn't stop the server**: Fixed — the Node process is terminated correctly with `SIGTERM`/`SIGKILL`.
+- **Missing dependencies / server crashes on start**: Install server deps with `npm install --prefix server` in the plugin directory. Errors are shown in a notification and captured to `server_log` if configured.
+- **Logging**: Set `server_log = "/tmp/bracey_server.log"` in `setup()` to see the full Node stdout/stderr.
 
 ## How it works
 

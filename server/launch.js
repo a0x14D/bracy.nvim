@@ -27,6 +27,11 @@ var args = [
 		long: "allow-remote-editor",
 		value: false,
 	},
+	{
+		short: "t",
+		long: "token",
+		value: true,
+	},
 ];
 
 var settings = {};
@@ -64,6 +69,7 @@ for (var i = 2; i < process.argv.length; i++) {
 settings.port = settings.port || 13378;
 settings["web-address"] = settings.address || "127.0.0.1";
 settings["editor-address"] = settings.address || "127.0.0.1";
+settings.token = settings.token || "";
 
 console.log = function (msg) {
 	process.stderr.write(util.format(msg) + "\n");

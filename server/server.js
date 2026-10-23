@@ -185,6 +185,15 @@ Server.prototype.stripParams = function (url) {
 };
 
 Server.prototype.handleFileRequest = function (request, response) {
+	// Readiness probe. Returns the per-session token so the editor can be sure
+	// it is talking to the instance it just spawned (and not some other
+	// process squatting on the port).
+	if (request.url == "/__bracey_health") {
+		response.writeHead(200, { "Content-Type": "text/plain" });
+		response.end(this.settings.token || "bracey");
+		return;
+	}
+
 	if (request.url == "/") {
 		var currentFile = this.files.getCurrentHtmlFile();
 		if (currentFile === undefined) {
